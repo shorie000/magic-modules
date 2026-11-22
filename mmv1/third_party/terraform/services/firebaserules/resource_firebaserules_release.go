@@ -29,11 +29,15 @@ func ResourceFirebaserulesRelease() *schema.Resource {
 
 		Timeouts: &schema.ResourceTimeout{
 			Create: schema.DefaultTimeout(20 * time.Minute),
+			Update: schema.DefaultTimeout(20 * time.Minute),
 			Delete: schema.DefaultTimeout(20 * time.Minute),
 		},
 		CustomizeDiff: customdiff.All(
 			tpgresource.DefaultProviderProject,
 			tpgresource.DefaultProviderDeletionPolicy("DELETE"),
+			customdiff.ForceNewIf("ruleset_name", func(_ context.Context, d *schema.ResourceDiff, _ interface{}) bool {
+				return !d.Get("update_ruleset_in_place").(bool)
+			}),
 		),
 
 		Schema: map[string]*schema.Schema{
@@ -47,9 +51,15 @@ func ResourceFirebaserulesRelease() *schema.Resource {
 			"ruleset_name": {
 				Type:             schema.TypeString,
 				Required:         true,
-				ForceNew:         true,
 				DiffSuppressFunc: tpgresource.CompareSelfLinkOrResourceName,
-				Description:      "Name of the `Ruleset` referred to by this `Release`. The `Ruleset` must exist for the `Release` to be created.",
+				Description:      "Name of the `Ruleset` referred to by this `Release`. The `Ruleset` must exist for the `Release` to be created. Changing this field replaces the `Release` unless `update_ruleset_in_place` is true.",
+			},
+
+			"update_ruleset_in_place": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
+				Description: "If true, changing `ruleset_name` updates the `Release` in place instead of deleting and recreating it, so the `Release` never stops being served. The new `Ruleset` must exist before the `Release` is updated, so set `create_before_destroy` on the `Ruleset` it refers to. Defaults to false.",
 			},
 
 			"project": {
@@ -197,7 +207,50 @@ func resourceFirebaserulesReleaseRead(d *schema.ResourceData, meta interface{}) 
 
 // UDP update start
 func resourceFirebaserulesReleaseUpdate(d *schema.ResourceData, meta interface{}) error {
-	// Only the root field "deletion_policy", "labels", "terraform_labels", and virtual fields are mutable
+	// Besides "ruleset_name", only the root field "deletion_policy" and virtual fields are mutable
+	if !d.HasChange("ruleset_name") {
+		return resourceFirebaserulesReleaseRead(d, meta)
+	}
+
+	config := meta.(*transport_tpg.Config)
+	project, err := tpgresource.GetProject(d, config)
+	if err != nil {
+		return err
+	}
+
+	obj := &Release{
+		Name:        dcl.String(d.Get("name").(string)),
+		RulesetName: dcl.String(d.Get("ruleset_name").(string)),
+		Project:     dcl.String(project),
+	}
+	directive := tpgdclresource.UpdateDirective
+	userAgent, err := tpgresource.GenerateUserAgentString(d, config.UserAgent)
+	if err != nil {
+		return err
+	}
+
+	billingProject := project
+	// err == nil indicates that the billing_project value was found
+	if bp, err := tpgresource.GetBillingProject(d, config); err == nil {
+		billingProject = bp
+	}
+	client := NewDCLFirebaserulesClient(config, userAgent, billingProject, d.Timeout(schema.TimeoutUpdate))
+	if bp, err := tpgresource.ReplaceVars(d, config, client.Config.BasePath); err != nil {
+		d.SetId("")
+		return fmt.Errorf("Could not format %q: %w", client.Config.BasePath, err)
+	} else {
+		client.Config.BasePath = bp
+	}
+	res, err := client.ApplyRelease(context.Background(), obj, directive...)
+
+	if _, ok := err.(dcl.DiffAfterApplyError); ok {
+		log.Printf("[DEBUG] Diff after apply returned from the DCL: %s", err)
+	} else if err != nil {
+		return fmt.Errorf("Error updating Release: %s", err)
+	}
+
+	log.Printf("[DEBUG] Finished updating Release %q: %#v", d.Id(), res)
+
 	return resourceFirebaserulesReleaseRead(d, meta)
 }
 
@@ -262,6 +315,11 @@ func resourceFirebaserulesReleaseImport(d *schema.ResourceData, meta interface{}
 		return nil, fmt.Errorf("Error constructing id: %s", err)
 	}
 	d.SetId(id)
+
+	// Explicitly set virtual fields to default values on import
+	if err := d.Set("update_ruleset_in_place", false); err != nil {
+		return nil, fmt.Errorf("Error setting update_ruleset_in_place: %s", err)
+	}
 
 	return []*schema.ResourceData{d}, nil
 }

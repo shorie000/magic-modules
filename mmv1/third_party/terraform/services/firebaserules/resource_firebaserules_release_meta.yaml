@@ -12,3 +12,5 @@ fields:
   - api_field: 'updateTime'
   - field: 'deletion_policy'
     provider_only: true
+  - field: 'update_ruleset_in_place'
+    provider_only: true
