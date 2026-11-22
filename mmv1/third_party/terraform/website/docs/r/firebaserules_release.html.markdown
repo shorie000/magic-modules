@@ -111,7 +111,7 @@ The following arguments are supported:
   
 * `ruleset_name` -
   (Required)
-  Name of the `Ruleset` referred to by this `Release`. The `Ruleset` must exist for the `Release` to be created.
+  Name of the `Ruleset` referred to by this `Release`. The `Ruleset` must exist for the `Release` to be created. Changing this field replaces the `Release` unless `update_ruleset_in_place` is true.
   
 
 
@@ -120,6 +120,10 @@ The following arguments are supported:
 * `project` -
   (Optional)
   The project for the resource
+
+* `update_ruleset_in_place` -
+  (Optional)
+  If true, changing `ruleset_name` updates the `Release` in place instead of deleting and recreating it, so the `Release` never stops being served. The new `Ruleset` must exist before the `Release` is updated, so set `create_before_destroy` on the `Ruleset` it refers to. Defaults to false.
 
 * `deletion_policy` - (Optional) Whether Terraform will be prevented from destroying the resource. Defaults to "DELETE".
     When a 'terraform destroy' or 'terraform apply' would delete the resource,
@@ -150,6 +154,7 @@ This resource provides the following
 [Timeouts](https://developer.hashicorp.com/terraform/plugin/sdkv2/resources/retries-and-customizable-timeouts) configuration options:
 
 - `create` - Default is 20 minutes.
+- `update` - Default is 20 minutes.
 - `delete` - Default is 20 minutes.
 
 ## Import
